@@ -223,7 +223,7 @@ def getGraphics(field='62-05'):
 @app.route('/api/gettable/')
 @cross_origin(supports_credentials=True)
 def getTable(field='62-05'):
-    return make_response(getTableData(db, field))
+    return make_response(jsonify(getTableData(db, field)))
 
 # data = [(r[0].value, int(datetime.datetime.timestamp(r[1].value)), r[2].value, r[3].value, r[4].value, r[5].value, r[10].value, r[20].value, r[21].value) for r in [row for row in ws.rows][5:] if r[1].value]
 
@@ -245,7 +245,7 @@ def setTableChange(field='62-05'):
         print(f"replacing {col} {request.args['row']} with {request.args['value']}")
         cur.execute(f'UPDATE field62z05 set {fieldColumns[col]} = ? WHERE id = ?', (request.args['value'], int(request.args['row'])+1))
         db.commit()
-        return make_response(getTableData(db, field))
+        return make_response(jsonify(getTableData(db, field)))
     return make_response('')
 
 
