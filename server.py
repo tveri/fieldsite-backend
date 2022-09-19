@@ -1,7 +1,7 @@
+from glob import glob
 from flask import Flask, request, send_from_directory, jsonify, render_template, redirect, make_response, send_file
-import re, os, datetime, time, json, sqlite3
+import re, os, shutil, datetime, time, json, sqlite3
 import openpyxl as ox
-from openpyxl.utils.cell import coordinate_from_string, column_index_from_string
 from flask_cors import CORS, cross_origin
 
 MONTHS = [
@@ -177,7 +177,7 @@ def dataFromDBtoTableData(rawData):
     columnsInRow = [0 for _ in range(29)]
     for row in range(len(rawData)):
         data.append(columnsInRow[:])
-        date = datetime.datetime.fromtimestamp(round(d if (d := rawData[row][1]) else 0, 2))
+        date = datetime.datetime.fromtimestamp(int(d) if (d := rawData[row][1]) else 0)
         data[row][0] = round(d if (d := rawData[row][0]) else 0, 2)
         data[row][1] = f'{date.day if date.day > 9 else f"0{date.day}"}.{date.month if date.month > 9 else f"0{date.month}"}.{date.year}'
         data[row][2] = round(d if (d := rawData[row][2]) else 0, 2)
@@ -243,10 +243,54 @@ colMatch = {
 def setTableChange(field='62-05'):
     if (col := colMatch.get(int(request.args['column']))) and col <= 8 and request.args['value']:
         print(f"replacing {col} {request.args['row']} with {request.args['value']}")
-        cur.execute(f'UPDATE field62z05 set {fieldColumns[col]} = ? WHERE id = ?', (request.args['value'], int(request.args['row'])+1))
+        value = float(request.args['value'].replace(',', '.').split('\n')[0])
+        cur.execute(f'UPDATE field62z05 set {fieldColumns[col]} = ? WHERE id = ?', (value, int(request.args['row'])+1))
         db.commit()
         return make_response(jsonify(getTableData(db, field)))
     return make_response('')
+
+
+@app.route('/api/gettemplate/')
+def getTemplate():
+    field = request.args['field']
+    wb = ox.load_workbook('template.xlsx')
+    ws = wb['template']
+    data = getDataFromDB(getConnection(), field)
+    for row, rowVal in enumerate(data):
+        for col, colVal in enumerate(rowVal):
+            if col == 1:
+                date = datetime.datetime.fromtimestamp(int(colVal))
+                colVal = '.'.join([str(d) if (d := date.day) > 9 else f'0{d}', str(m) if (m := date.month) > 9 else f'0{m}', str(date.year)])
+            ws[row+2][col].value = colVal
+    wb.save(f'fieldsTemplates/field{field}.xlsx')
+    wb.close()
+    return send_file(f'fieldsTemplates/field{field}.xlsx')
+
+
+@app.route('/api/sendtemplate/', methods=['POST'])
+def sendTemplate(field='62-05'):
+    timestamp = int(datetime.datetime.now().timestamp())
+    filename = f'./fieldsRecivedTemlates/{timestamp}.xlsx'
+    request.files.to_dict()['files[]'].save(filename)
+    wb = ox.load_workbook(filename)
+    ws = wb.worksheets[0]
+    data = [
+        (r[0].value, 
+        int(datetime.datetime.fromisoformat('-'.join(reversed(r[1].value.split('.'))) + 'T00:00:00.000000').timestamp()), 
+        r[2].value, 
+        r[3].value, 
+        r[4].value, 
+        r[5].value, 
+        r[6].value, 
+        r[7].value, 
+        r[8].value
+        ) for r in [row for row in ws.rows][1:] if r[1].value]
+    for rowId, rowVal in [(d[0], d[1:]) for d in data]:
+        for col, colValue in enumerate(rowVal):
+            cur.execute(f'UPDATE field{field.replace("-", "z")} set {fieldColumns[col+1]} = ? WHERE id = ?', (colValue, rowId))
+    db.commit()
+    
+    return jsonify(getTableData(db, field))
 
 
 if __name__ == "__main__":
