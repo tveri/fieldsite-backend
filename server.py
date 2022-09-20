@@ -172,14 +172,14 @@ def calcAllData(data, globalData):
         data[row][28] = round(ACfunc(data, row), 2)
     return data
 
-def dataFromDBtoTableData(rawData):
+def dataFromDBtoTableData(rawData, timestamp=False):
     data = []
     columnsInRow = [0 for _ in range(29)]
     for row in range(len(rawData)):
         data.append(columnsInRow[:])
         date = datetime.datetime.fromtimestamp(int(d) if (d := rawData[row][1]) else 0)
         data[row][0] = round(d if (d := rawData[row][0]) else 0, 2)
-        data[row][1] = f'{date.day if date.day > 9 else f"0{date.day}"}.{date.month if date.month > 9 else f"0{date.month}"}.{date.year}'
+        data[row][1] = f'{date.day if date.day > 9 else f"0{date.day}"}.{date.month if date.month > 9 else f"0{date.month}"}.{date.year}' if not timestamp else int(d) if (d := rawData[row][1]) else 0
         data[row][2] = round(d if (d := rawData[row][2]) else 0, 2)
         data[row][3] = round(d if (d := rawData[row][3]) else 0, 2)
         data[row][4] = round(d if (d := rawData[row][4]) else 0, 2)
@@ -197,14 +197,14 @@ def getGlobalDataFromDB(db, field='62-05'):
     return cur.execute(f"SELECT * FROM field{field.replace('-', 'z')}global").fetchall()[0][1:]
 
 
-def getTableData(db, field='62-05'):
-    return calcAllData(dataFromDBtoTableData(getDataFromDB(db, field)), getGlobalDataFromDB(db, field))
+def getTableData(db, field='62-05', timestamp=False):
+    return calcAllData(dataFromDBtoTableData(getDataFromDB(db, field), timestamp=timestamp), getGlobalDataFromDB(db, field))
 
 
 @app.route('/api/getgraphics/')
 def getGraphics(field='62-05'):
     resp = []
-    data = getTableData(db, field)
+    data = getTableData(db, field, timestamp=True)
 
     for row in data:
         resp.append({
