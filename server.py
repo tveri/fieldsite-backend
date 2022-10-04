@@ -347,6 +347,7 @@ def setTableChange(field='62-05'):
 
 @app.route('/api/sendsettigstablechanges/', methods=['POST'])
 def sendSettingsTableChanges(field='62-05'):
+    print('settigstablechanges')
     print(request.json)
     for key in request.json:
         table, column, row = key.split(',')
