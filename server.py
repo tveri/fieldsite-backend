@@ -221,6 +221,10 @@ def dateToStr(date):
     return f'{date.day if date.day > 9 else f"0{date.day}"}.{date.month if date.month > 9 else f"0{date.month}"}.{date.year}'
 
 
+def strToDate(strDate):
+    return datetime.datetime.fromisoformat('-'.join(reversed(strDate.split('.'))) + 'T00:00:00.000000')
+
+
 @app.route('/api/getgraphics/')
 def getGraphics(field='62-05'):
     resp = []
@@ -249,7 +253,16 @@ def getTable(field='62-05'):
 @app.route('/api/getsettingstable/')
 @cross_origin(supports_credentials=True)
 def getSettingsTable(field='62-05'):
-    data = [[d] for d in getGlobalDataFromDB(db, field)]
+    data = []
+    data.append([[d] for d in getGlobalDataFromDB(db, field)])
+    data[0][0][0] = dateToStr(datetime.datetime.fromtimestamp(data[0][0][0]))
+    data.append([
+        (
+            dateToStr(datetime.datetime.fromtimestamp(d[fieldColumnsNames['date']])), 
+            round(d[fieldColumnsNames['air_temp']], 2),
+            round(d[fieldColumnsNames['air_hum']], 2), 
+            round(d[fieldColumnsNames['wind_speed']], 2)
+        ) for d in getDataFromDB(db, field)])
     return make_response(jsonify(data))
 
 
@@ -326,9 +339,23 @@ def setTableChange(field='62-05'):
     if (col := colMatch.get(int(request.args['column']))) and col <= 8 and request.args['value']:
         print(f"replacing {col} {request.args['row']} with {request.args['value']}")
         value = float(request.args['value'].replace(',', '.').split('\n')[0])
-        cur.execute(f'UPDATE field62z05 set {fieldColumns[col]} = ? WHERE id = ?', (value, int(request.args['row'])+1))
+        cur.execute(f'UPDATE field62z05 set {fieldColumns[col-1]} = ? WHERE id = ?', (value if int(request.args['column']) != 1 else int(strToDate(value).timestamp()), int(request.args['row'])+1))
         db.commit()
         return make_response(jsonify(getTableData(db, field)))
+    return make_response('')
+
+
+@app.route('/api/sendsettigstablechanges/', methods=['POST'])
+def sendSettingsTableChanges(field='62-05'):
+    print(request.json)
+    for key in request.json:
+        table, column, row = key.split(',')
+        if int(table):
+            print(column, row, request.json[key])
+            cur.execute(f'UPDATE field{field.replace("-", "z")} set {fieldColumns[int(column)+1]} = ? WHERE id = ?', (request.json[key], int(row)+1))
+            continue
+        cur.execute(f'UPDATE field{field.replace("-", "z")}global set {fieldGlobalColumns[int(row)+1]} = ? WHERE id = 0', [request.json[key] if int(row) != 0 else int(strToDate(request.json[key]).timestamp())])
+    db.commit()
     return make_response('')
 
 
@@ -358,7 +385,7 @@ def sendTemplate(field='62-05'):
     ws = wb.worksheets[0]
     data = [
         (r[0].value, 
-        int(datetime.datetime.fromisoformat('-'.join(reversed(r[1].value.split('.'))) + 'T00:00:00.000000').timestamp()), 
+        int(strToDate(r[1].value).timestamp()),
         r[2].value, 
         r[3].value, 
         r[4].value, 
