@@ -1,6 +1,6 @@
 from glob import glob
 from flask import Flask, request, send_from_directory, jsonify, render_template, redirect, make_response, send_file
-import re, os, shutil, datetime, time, json, sqlite3
+import re, os, shutil, datetime, time, json, sqlite3, xml.dom.minidom, threading
 import openpyxl as ox
 from flask_cors import CORS, cross_origin
 from openpyxl.utils.cell import get_column_letter
@@ -36,6 +36,7 @@ fieldColumnsNames = {fieldColumns[k]: k for k in fieldColumns}
 fieldGlobalColumns = {col[0]: col[1] for col in cur.execute('PRAGMA table_info(field62z05global)').fetchall()}
 fieldGlobalColumnsNames = {fieldGlobalColumns[k]: k-1 for k in fieldGlobalColumns}
 
+lock = threading.Lock()
 
 def getConnection():
     return sqlite3.connect('./fields.db', check_same_thread=False)
@@ -202,15 +203,43 @@ def dataFromDBtoTableData(rawData, timestamp=False):
     return data
 
 def getDataFromDB(db, field='62-05'):
-    return cur.execute(f"SELECT * FROM field{field.replace('-', 'z')}").fetchall()
+    lock.acquire(True)
+    cur.execute(f"SELECT * FROM field{field.replace('-', 'z')}")
+    resp = cur.fetchall()
+    lock.release()
+    return resp
 
 
 def getGlobalDataFromDB(db, field='62-05'):
-    return cur.execute(f"SELECT * FROM field{field.replace('-', 'z')}global").fetchall()[0][1:]
+    lock.acquire(True)
+    cur.execute(f"SELECT * FROM field{field.replace('-', 'z')}global")
+    resp = cur.fetchall()[0][1:]
+    lock.release()
+    return resp
 
 
 def getFieldsFromDB(db):
-    return cur.execute(f"SELECT * FROM fields").fetchall()
+    lock.acquire(True)
+    cur.execute(f"SELECT * FROM fields")
+    resp = cur.fetchall()
+    lock.release()
+    return resp
+
+
+def getCulturesFromDB(db):
+    lock.acquire(True)
+    cur.execute(f"SELECT * FROM cultures")
+    resp = cur.fetchall()
+    lock.release()
+    return resp
+
+
+def getMeteostationsFromDB(db):
+    lock.acquire(True)
+    cur.execute(f"SELECT * FROM meteostations")
+    resp = cur.fetchall()
+    lock.release()
+    return resp
 
 
 def getTableData(db, field='62-05', timestamp=False):
@@ -218,35 +247,101 @@ def getTableData(db, field='62-05', timestamp=False):
 
 
 def dateToStr(date):
-    return f'{date.day if date.day > 9 else f"0{date.day}"}.{date.month if date.month > 9 else f"0{date.month}"}.{date.year}'
+    try:
+        resp = f'{date.day if date.day > 9 else f"0{date.day}"}.{date.month if date.month > 9 else f"0{date.month}"}.{date.year}'
+    except Exception as e:
+        print(e)
+        resp = ''
+    return resp
 
 
 def strToDate(strDate):
     return datetime.datetime.fromisoformat('-'.join(reversed(strDate.split('.'))) + 'T00:00:00.000000')
 
 
+@app.route('/api/getkml/')
+def getKml():
+    return send_from_directory(directory='./', path='./КУР-СОЛ-0029-1.kml')
+
+
 @app.route('/api/getgraphics/')
-def getGraphics(field='62-05'):
+def getGraphics():
+    try:
+        field = request.args['field']
+    except Exception as e:
+        print(e)
+        field = '62-05'
     resp = []
     data = getTableData(db, field, timestamp=True)
 
     for row in data:
         resp.append({
-                    'data': f'{(d := datetime.datetime.fromtimestamp(row[1])).day} {MONTHS[d.month]}',
+                    'data': f'{(d := datetime.datetime.fromtimestamp(row[1])).day} {MONTHS[d.month-1]}',
                     'humidityRange': round(row[27]),
                     'humidity': round(row[28]),
                     'waterIntake': round(row[11]),
                     'rain': round(row[20]),
                     'watering':  round(row[21])
                 })
-
-
     return make_response(jsonify(resp))
+
+
+@app.route('/api/getglobaldata/')
+@cross_origin(supports_credentials=True)
+def getGlobalData():
+    try:
+        field = request.args['field']
+    except Exception as e:
+        print(e)
+        field = '62-05'
+    resp = {
+        'table': [],
+        'selection':
+        {
+            'cultures': [],
+            'meteostations': []
+        }
+    }
+    data = getGlobalDataFromDB(db, field)
+    resp['selection']['cultures'] = {
+        'value': {'value': data[6], 'label': data[6]},
+        'list': [{'value': c[1], 'label': c[1]} for c in getCulturesFromDB(db)]
+        }
+    resp['selection']['meteostations'] = {
+        'value': {'value': data[7], 'label': data[7]},
+        'list': [{'value': m[1], 'label': m[1]} for m in getMeteostationsFromDB(db)]
+        }
+    resp['table'].append(tuple([dateToStr(datetime.datetime.fromtimestamp(data[0]))]) + data[1:])
+    return make_response(jsonify(resp))
+
+
+@app.route('/api/sendglobaldatachange/')
+@cross_origin(supports_credentials=True)
+def sendGlobalDataChange():
+    try:
+        field = request.args['field']
+    except Exception as e:
+        print(e)
+        field = '62-05'
+    col = int(request.args['col'])+1
+    value = request.args['val']
+    lock.acquire(True)
+    print(fieldGlobalColumns)
+    if col != 0 or (col == 0 and len(value) == 10):
+        cur.execute(f'UPDATE field{field.replace("-", "z")}global set {fieldGlobalColumns[col]} = ? WHERE id = 0', [value if col != 0 else int(strToDate(value).timestamp())])
+    lock.release()
+    db.commit()
+    return make_response('')
 
 
 @app.route('/api/gettable/')
 @cross_origin(supports_credentials=True)
-def getTable(field='62-05'):
+def getTable():
+    try:
+        field = request.args['field']
+    except Exception as e:
+        print(e)
+        field = '62-05'
     return make_response(jsonify(getTableData(db, field)))
 
 
@@ -272,8 +367,8 @@ def getDashboardTable():
     resp = {
         'header': [
             [],
-            ['','','','','','','','','','',''],
-            ['№', '', 'Номер поля', 'Дата сева', 'Дни', 'Pivot №', 'Площадь, Га', 'мм', '% FC', 'мм', 'Дни полива', 'irrigation', 'rainfall']
+            ['','','','','','','','',''],
+            ['№', 'Номер поля', 'Дата сева', 'Дней с даты сева', '% FC', 'мм', 'Дней полива', 'Полив, мм', 'Осадки, мм']
         ],
         'tables': [
             []
@@ -289,11 +384,8 @@ def getDashboardTable():
             lastMonth = month
             continue
         resp['header'][1].append('')
-    
-    resp['header'][1].append('')
-    resp['header'][1].append('')
 
-    resp['header'][2] = resp['header'][2][:11] + [datetime.datetime.fromtimestamp(d[fieldColumnsNames['date']]).day for d in data] + resp['header'][2][11:]
+    resp['header'][2] = resp['header'][2] + [dateToStr(datetime.datetime.fromtimestamp(d[fieldColumnsNames['date']]))[:5] for d in data]
 
     for i in range(len(resp['header'][2])):
         resp['header'][0].append(get_column_letter(i+1))
@@ -307,15 +399,14 @@ def getDashboardTable():
         resp['tables'][0].append(rowTemplate[:])
         resp['tables'][0][i][0] = i+1
         resp['tables'][0][i][1] = field
-        resp['tables'][0][i][2] = field
-        resp['tables'][0][i][3] = dateToStr(datetime.datetime.fromtimestamp(dataGlobal[fieldGlobalColumnsNames['sowing_date']]))
-        resp['tables'][0][i][4] = (datetime.datetime.now().timestamp() - dataGlobal[fieldGlobalColumnsNames['sowing_date']]) // 86400
-        resp['tables'][0][i][8] = [d[13] for d in data if d[1]//86400*86400 == date//86400*86400][0]
-        resp['tables'][0][i][10] = sum([1 for d in data if (d[21] if isinstance(d[21], (int, float)) else 0) > 0])
+        resp['tables'][0][i][2] = dateToStr(datetime.datetime.fromtimestamp(dataGlobal[fieldGlobalColumnsNames['sowing_date']]))
+        resp['tables'][0][i][3] = (datetime.datetime.now().timestamp() - dataGlobal[fieldGlobalColumnsNames['sowing_date']]) // 86400
+        resp['tables'][0][i][4] = round([(d[28] - d[13]) / d[13] for d in data if d[1]//86400*86400 == date//86400*86400][0])
+        resp['tables'][0][i][6] = sum([1 for d in data if (d[21] if isinstance(d[21], (int, float)) else 0) > 0])
+        resp['tables'][0][i][7] = round(sum([(d[21] if isinstance(d[21], (int, float)) else 0) for d in data]), 2)
+        resp['tables'][0][i][8] = round(sum([(d[20] if isinstance(d[20], (int, float)) else 0) for d in data]), 2)
         for col, val in enumerate([round((d[20] if isinstance(d[20], (int, float)) else 0) + (d[21] if isinstance(d[21], (int, float)) else 0), 2) for d in data]):
-            resp['tables'][0][i][col+11] = val
-        resp['tables'][0][i][-2] = round(sum([(d[21] if isinstance(d[21], (int, float)) else 0) for d in data]), 2)
-        resp['tables'][0][i][-1] = round(sum([(d[20] if isinstance(d[20], (int, float)) else 0) for d in data]), 2)
+            resp['tables'][0][i][col+9] = val
     
     return make_response(jsonify(resp))
 
@@ -335,11 +426,18 @@ colMatch = {
 }
 
 @app.route('/api/settablechange/')
-def setTableChange(field='62-05'):
+def setTableChange():
+    try:
+        field = request.args['field']
+    except Exception as e:
+        print(e)
+        field = '62-05'
     if (col := colMatch.get(int(request.args['column']))) and col <= 8 and request.args['value']:
         print(f"replacing {col} {request.args['row']} with {request.args['value']}")
         value = float(request.args['value'].replace(',', '.').split('\n')[0])
-        cur.execute(f'UPDATE field62z05 set {fieldColumns[col-1]} = ? WHERE id = ?', (value if int(request.args['column']) != 1 else int(strToDate(value).timestamp()), int(request.args['row'])+1))
+        lock.acquire(True)
+        cur.execute(f'UPDATE field{field.replace("-", "z")} set {fieldColumns[col-1]} = ? WHERE id = ?', (value if int(request.args['column']) != 1 else int(strToDate(value).timestamp()), int(request.args['row'])+1))
+        lock.release()
         db.commit()
         return make_response(jsonify(getTableData(db, field)))
     return make_response('')
@@ -351,11 +449,13 @@ def sendSettingsTableChanges(field='62-05'):
     print(request.json)
     for key in request.json:
         table, column, row = key.split(',')
+        lock.acquire(True)
         if int(table):
             print(column, row, request.json[key])
             cur.execute(f'UPDATE field{field.replace("-", "z")} set {fieldColumns[int(column)+1]} = ? WHERE id = ?', (request.json[key], int(row)+1))
             continue
         cur.execute(f'UPDATE field{field.replace("-", "z")}global set {fieldGlobalColumns[int(row)+1]} = ? WHERE id = 0', [request.json[key] if int(row) != 0 else int(strToDate(request.json[key]).timestamp())])
+        lock.release()
     db.commit()
     return make_response('')
 
@@ -397,7 +497,9 @@ def sendTemplate(field='62-05'):
         ) for r in [row for row in ws.rows][1:] if r[1].value]
     for rowId, rowVal in [(d[0], d[1:]) for d in data]:
         for col, colValue in enumerate(rowVal):
+            lock.acquire(True)
             cur.execute(f'UPDATE field{field.replace("-", "z")} set {fieldColumns[col+1]} = ? WHERE id = ?', (colValue, rowId))
+            lock.release()
     db.commit()
     
     return jsonify(getTableData(db, field))
