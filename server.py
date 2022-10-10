@@ -272,7 +272,7 @@ def getDashboardTable(date):
         resp['tables'][0][i][6] = sum([1 for d in data if (d[21] if isinstance(d[21], (int, float)) else 0) > 0 and d[1]//86400 <= date//86400])
         resp['tables'][0][i][7] = round(sum([(d[21] if isinstance(d[21], (int, float)) else 0) for d in data if d[1]//86400 <= date//86400]), 2)
         resp['tables'][0][i][8] = round(sum([(d[20] if isinstance(d[20], (int, float)) else 0) for d in data if d[1]//86400 <= date//86400]), 2)
-        for col, val in enumerate([round((d[20] if isinstance(d[20], (int, float)) else 0) + (d[21] if isinstance(d[21], (int, float)) else 0), 2) for d in data]):
+        for col, val in enumerate([round((d[21] if isinstance(d[21], (int, float)) else 0), 2) for d in data]):
             resp['tables'][0][i][col+9] = val
     
     return resp
@@ -485,9 +485,10 @@ def sendDashboardTableChanges():
         return make_response('')
     lock.acquire(True)
     print(f'writing: {val} to {dateStr}')
+    print('asdasdasdasdasd')
     cur.execute(f'UPDATE field{field.replace("-", "z")} set watering_count = ? WHERE date = ?', (float(val), date))
-    lock.release()
     db.commit()
+    lock.release()
     return make_response(jsonify(getDashboardTable(strToDate(request.json['date']))))
 
 
