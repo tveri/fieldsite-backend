@@ -4,8 +4,9 @@ from pprint import pprint
 from sys import hash_info
 from wsgiref.util import request_uri
 from flask import Flask, request, send_from_directory, jsonify, render_template, redirect, make_response, send_file
-import re, os, shutil, datetime, time, json, sqlite3, xml.dom.minidom, threading
+import re, os, shutil, datetime, time, json, sqlite3, threading
 import openpyxl as ox
+import xml.dom.minidom as xml
 from flask_cors import CORS, cross_origin
 from openpyxl.utils.cell import get_column_letter
 from bs4 import BeautifulSoup
@@ -68,7 +69,7 @@ def tryDecorator(func):
         try:
             return func(*args, **kwargs)
         except Exception as e:
-            print('calc error: ', func, e)
+            # print('calc error: ', func, e)
             return 0
     return wrapper
 
@@ -243,7 +244,14 @@ def dataFromDBtoTableData(rawData, timestamp=False):
     return data
 
 
+dashboardDates = []
+lock.acquire(True)
+dashboardDates = cur.execute('SELECT date from ooo_kyrsk_agroaktiv__gorshechenskiy__field62_05')
+dashboardDates = dashboardDates.fetchall()
+lock.release()
+dashboardFields = {}
 def getDashboardTable(date, request):
+    
     resp = {
         'date': '',
         'header': [
@@ -258,12 +266,8 @@ def getDashboardTable(date, request):
     economy = request.json['userEconomy']
     resp['date'] = dateToStr(date)
     date = date.timestamp()
-    data = []
     lastMonth = -1
-    lock.acquire(True)
-    data = cur.execute('SELECT date from ooo_kyrsk_agroaktiv__gorshechenskiy__field62_05').fetchall()
-    lock.release()
-    for d in data:
+    for d in dashboardDates:
         resp['header'][2].append(dateToStr(datetime.datetime.fromtimestamp(d[0]))[:5])
         if lastMonth != (month := datetime.datetime.fromtimestamp(d[0]).month):
             resp['header'][1].append(MONTHS[month-1])
@@ -274,11 +278,17 @@ def getDashboardTable(date, request):
     for i in range(len(resp['header'][2])):
         resp['header'][0].append(get_column_letter(i+1))
 
-    fields = cur.execute(f'SELECT * from {economy}').fetchall()
+    lock.acquire(True)
+    fields = cur.execute(f'SELECT * from {economy}').fetchall() if (economy != dashboardFields.get('economy')) else dashboardFields['fields']
+    lock.release()
+    dashboardFields['fields'] = fields
+    dashboardFields['economy'] = economy
     rowTemplate = ['' for _ in range(len(resp['header'][2]))]
     for field in fields:
         row = int(field[0])
+        lock.acquire(True)
         data = calcAllData(dataFromDBtoTableData(cur.execute(f'SELECT * FROM {field[4]}').fetchall()), field, timestamp=True)
+        lock.release()
 
         resp['tables'][0].append(rowTemplate[:])
         resp['tables'][0][row][0] = row
@@ -291,25 +301,29 @@ def getDashboardTable(date, request):
         resp['tables'][0][row][7] = round(sum([(d[21] if isinstance(d[21], (int, float)) else 0) for d in data if d[1]//86400 <= date//86400]), 2)
         resp['tables'][0][row][8] = round(sum([(d[20] if isinstance(d[20], (int, float)) else 0) for d in data if d[1]//86400 <= date//86400]), 2)
         for col, val in enumerate([round((d[21] if isinstance(d[21], (int, float)) else 0), 2) for d in data]):
-            resp['tables'][0][row][col+9] = val
+            try:
+                resp['tables'][0][row][col+9] = val
+            except Exception as e:
+                print(123123, e)
     
     [resp['tables'][0].insert(0, row) for row in resp['header'][::-1]]
     resp['tables'] = [[[{'value': val} for val in row] for row in resp['tables'][0]]]
     return resp
 
 
-def getDataFromDB(db, field='62-05'):
+def getDataFromDB(db, field='62-05', economy='ooo_kyrsk_agroaktiv'):
     lock.acquire(True)
-    cur.execute(f"SELECT * FROM field{field.replace('-', 'z')}")
+    cur.execute(f"SELECT field_id FROM {economy} WHERE field_name = ?", [field])
+    cur.execute(f"SELECT * FROM {cur.fetchone()[0]}")
     resp = cur.fetchall()
     lock.release()
     return resp
 
 
-def getGlobalDataFromDB(db, field='62-05'):
+def getGlobalDataFromDB(db, field='62-05', economy='ooo_kyrsk_agroaktiv'):
     lock.acquire(True)
-    cur.execute(f"SELECT * FROM field{field.replace('-', 'z')}global")
-    resp = cur.fetchall()[0][1:]
+    cur.execute(f"SELECT * FROM {economy} WHERE field_name = ?", [field])
+    resp = cur.fetchall()
     lock.release()
     return resp
 
@@ -345,8 +359,8 @@ def getUserDataFromDB(db, login):
     return resp if resp else None
 
 
-def getTableData(db, field='62-05', timestamp=False):
-    return calcAllData(dataFromDBtoTableData(getDataFromDB(db, field), timestamp=timestamp), getGlobalDataFromDB(db, field), timestamp=timestamp)
+def getTableData(db, field='62-05', economy='ooo_kyrsk_agroaktiv', timestamp=False):
+    return calcAllData(dataFromDBtoTableData(getDataFromDB(db, field, economy), timestamp=timestamp), getGlobalDataFromDB(db, field, economy), timestamp=timestamp)
 
 
 def dateToStr(date):
@@ -392,7 +406,8 @@ def login():
         'roles': [0],
         'loginToken': '',
         'userEconomy': '',
-        'userEconomyName': ''
+        'userEconomyName': '',
+        'writableColumns': [],
     }
     login = request.json['data']['login']
     password = request.json['data']['password']
@@ -405,13 +420,47 @@ def login():
         resp['loginToken'] = hashlib.sha256(f'{login} {int(datetime.datetime.now().timestamp())}'.encode()).hexdigest()
         resp['userEconomy'] = userData[0][6]
         resp['userEconomyName'] = [d[0] for d in cur.execute('SELECT economy_name, economy_id from economies').fetchall() if d[1] == userData[0][6]][0]
+        resp['writableColumns'] = [int(l) for l in userData[0][7].split(',')] if userData[0][7] else [-1]
         usersDb.cursor().execute('UPDATE users set login_token = ? WHERE login = ?', (resp['loginToken'], login))
         usersDb.commit()
     return make_response(jsonify(resp))
 
 
+def adminpanelAddEconomy(request, userData):
+    print(request.json['data']['action']['economyName'], request.json['data']['action']['economyId'])
+    tableParams = 'id INTEGER PRIMARY KEY AUTOINCREMENT,' + ','.join([f'{l[1]} {l[2]}' for l in cur.execute('pragma table_info(ooo_kyrsk_agroaktiv)').fetchall()[1:]])
+    cur.execute(f"INSERT INTO economies(economy_name, economy_id) values(?, ?)", (request.json['data']['action']['economyName'], request.json['data']['action']['economyId']))
+    cur.execute(f"CREATE TABLE {request.json['data']['action']['economyId']}({tableParams})")
+    db.commit()
+    return make_response('')
+
+def setUserColumns(request, userData):
+    print(request.json['data'])
+    try:
+        [int(l.strip(' ')) for l in request.json['data']['action']['userColumns'].strip(', ').split(',')]
+    except Exception as e:
+        print('setUserColumns error: ', e)
+        
+    writableColumns = ','.join(list({'10', '20', '21'} & set([str(int(l.strip(', '))) for l in request.json['data']['action']['userColumns'].strip(', ').split(',') if l])))
+        
+    usersDb.cursor().execute("UPDATE users SET writable_columns = ? WHERE login = ?", [writableColumns, request.json['data']['action']['user']])
+    usersDb.commit()
+    return make_response('')
+
+adminpanelActions = {
+    'addEconomy': adminpanelAddEconomy,
+    'setUserColumns': setUserColumns,
+}
+
+@app.route('/api/sendadminpanelaction/', methods=['POST'])
+@cross_origin(supports_credentials=True)
+def adminpanelAction():
+    userData = authorize(request)
+    return adminpanelActions[request.json['data']['action']['actionName']](request, userData)
+
+
 def dashboardChanges(tableName, request):
-    print(request.json)
+    print(11121112111, request.json)
     try:
         [float(a) for a in request.json['date'].split('.')]
         if len(request.json['date']) != 10:
@@ -429,7 +478,9 @@ def dashboardChanges(tableName, request):
     for change in changes.values():
         economy = request.json['userEconomy']
         val, date = (change['value'], change['date'])
+        lock.acquire(True)
         field = [d[1] for d in cur.execute(f'SELECT field_name, field_id from {economy}') if d[0] == change['field']][0]
+        lock.release()
         date = int(strToDate(dateStr := f'{date}.{datetime.datetime.now().year}').timestamp())
         try:
             [float(a) for a in val.split('.')]
@@ -437,9 +488,16 @@ def dashboardChanges(tableName, request):
             1 / 10 - len(request.json['date'])
         except Exception as e:
             print(e)
-            return make_response('')
+            continue
         lock.acquire(True)
+        print(date)
+        # if not cur.execute(f'SELECT * FROM {field} WHERE date = ?', [date]).fetchall():
+        #     newId = (datetime.datetime.fromtimestamp(date) - strToDate(dateStr := f'01.05.{datetime.datetime.now().year}')).days
+        #     cur.execute(f'INSERT INTO {field}(id, date) VALUES(?, ?)', [newId, date])
+        #     print(f'INSERT {newId} {date}')
+        #     db.commit()
         print(f'writing: {val} to {dateStr}')
+        print(f'UPDATE {field} set watering = ? WHERE date = ?', (float(val), date))
         cur.execute(f'UPDATE {field} set watering = ? WHERE date = ?', (float(val), date))
         db.commit()
         lock.release()
@@ -448,6 +506,8 @@ def dashboardChanges(tableName, request):
 
 def fieldChanges(tableName, request):
     tableName = tableName.split('|')[1]
+    print(f'SELECT field_id FROM {request.json["userEconomy"]} WHERE field_name = "{tableName}"')
+    fieldId = cur.execute(f'SELECT field_id FROM {request.json["userEconomy"]} WHERE field_name = "{tableName}"').fetchone()[0]
     for key in (changes := request.json['data']['changes']):
         row, col = [int(l.strip('rc')) for l in key.split('|')]
         value = tryFloatValue(changes[key])
@@ -455,12 +515,21 @@ def fieldChanges(tableName, request):
         if value == None: 
             continue
         lock.acquire(True)
-        cur.execute(f'UPDATE field{tableName.replace("-", "z")} set {fieldColumns[writableColumnsMatch[col]]} = ? WHERE id = ?', (value, row))
+        cur.execute(f'UPDATE {fieldId} SET {fieldColumns[writableColumnsMatch[col]]} = ? WHERE id = ?', (value, row))
+        db.commit()
+        print(f'{value} writed into {fieldId} {fieldColumns[writableColumnsMatch[col]]} id = {row}')
         lock.release()
-        
+    
+    lock.acquire(True)
     fields = cur.execute(f'SELECT * from {request.json["userEconomy"]}').fetchall()
-    field = [l for l in fields if field in l[3]][0]
-    data = calcAllData(dataFromDBtoTableData(cur.execute(f'SELECT * FROM {field[4]}').fetchall()), field, timestamp=True)
+    lock.release()
+    
+    field = [l for l in fields if tableName in l[3]][0]
+    
+    lock.acquire(True)
+    data = calcAllData(dataFromDBtoTableData(cur.execute(f'SELECT * FROM {fieldId}').fetchall()), field, timestamp=False)
+    lock.release()
+    
     resp = [[{'value': cell if cell else ''} for cell in row] for row in data]
     resp.insert(0, tableheader)
     # pprint(resp)
@@ -504,7 +573,7 @@ def getMapFields():
     i = 0
     for _, f in enumerate(os.listdir(f'./kml/{userData[6]}/')):
         # field = f"{int(f.split('.')[0].split('-')[-2])}-{f.split('.')[0].split('-')[-1]}"
-        field = [l for l in fields if l[3] in f]
+        field = [l for l in fields if '-'.join([str(int(n)) for n in l[fieldGlobalColumnsNames['field_name']].split('-')]) in '-'.join([str(int(n)) for n in f.split('.')[0].split('-')[-2:]])]
         if not field: 
             print(f)
             continue
@@ -512,23 +581,21 @@ def getMapFields():
         isAvalible = bool(field)
         data = calcAllData(dataFromDBtoTableData(cur.execute(f'SELECT * FROM {field[4]}').fetchall()), field, timestamp=True) if isAvalible else []
         resp['data'].append({
-            'field': field[3],
+            'field': field[fieldGlobalColumnsNames['field_name']],
             'coordinates': [],
             'center': {
                 'lat': 51.46471, 
                 'lng': 37.23724
             },
             'isAvalible': isAvalible,
-            'color': '#' + redYellowGreenFade[min([round(d[25] / d[13] * 512) if d[13] != 0 else 0 for d in data][max(min(int(date//86400 - data[0][1]//86400), len(data)-1), 0)], 512)] if isAvalible else '#000000'
+            'color': '#' + redYellowGreenFade[min([round(d[25] / d[13] * 512) if d[13] != 0 else 0 for d in data][max(min(int(date//86400 - data[0][1]//86400), len(data)-1), 0)], 511)] if isAvalible else '#000000'
         })
 
 
         with open(f'./kml/{userData[6]}/' + f, 'r', encoding='utf-8') as file:
-            soup = BeautifulSoup(file, 'xml')
-            res = soup.find_all('coordinates')
-            if not res:
-                return make_response([])
-            coords = [{'lat': float(c.split(',')[1]), 'lng': float(c.split(',')[0])} for c in res[0].text.strip().split(' ')]
+            document = xml.parse(file)
+            rawCoords = document.getElementsByTagName('coordinates')[0].childNodes[0].wholeText.strip('\n\t ').split(' ')
+            coords = [{'lat': float(l.split(',')[1]), 'lng': float(l.split(',')[0])} for l in rawCoords]
             resp['data'][i]['coordinates'] = coords[:]
             resp['data'][i]['center']['lat'] = sum([lat['lat'] for lat in coords]) / len(coords)
             resp['data'][i]['center']['lng'] = sum([lng['lng'] for lng in coords]) / len(coords)
@@ -560,9 +627,12 @@ def getGraphics():
     return make_response(jsonify(resp))
 
 
-@app.route('/api/getglobaldata/')
+@app.route('/api/getglobaldata/', methods=['POST'])
 @cross_origin(supports_credentials=True)
 def getGlobalData():
+    print('//////////////')
+    userData = authorize(request)
+    print('//////////////')
     resp = {
         'table': [],
         'selection':
@@ -572,24 +642,37 @@ def getGlobalData():
         }
     }
     
-    field = request.args['field']
+    field = request.json['data']['field']
     
-    data = getGlobalDataFromDB(db, field)
+    data = getGlobalDataFromDB(db, field, userData[6])[0]
     resp['selection']['cultures'] = {
-        'value': {'value': data[6], 'label': data[6]},
+        'value': {'value': data[fieldGlobalColumnsNames['culture']], 'label': data[fieldGlobalColumnsNames['culture']]},
         'list': [{'value': c[1], 'label': c[1]} for c in getCulturesFromDB(db)]
         }
     resp['selection']['meteostations'] = {
-        'value': {'value': data[7], 'label': data[7]},
+        'value': {'value': data[fieldGlobalColumnsNames['meteostation']], 'label': data[fieldGlobalColumnsNames['meteostation']]},
         'list': [{'value': m[1], 'label': m[1]} for m in getMeteostationsFromDB(db)]
         }
-    resp['table'].append(tuple([dateToStr(datetime.datetime.fromtimestamp(data[0]))]) + data[1:])
+    resp['table'].append(tuple([dateToStr(datetime.datetime.fromtimestamp(data[10]))]) + data[11:] + data[8:10] + tuple([data[7]]))
+    print('||||||||||||')
+    pprint(resp)
     return make_response(jsonify(resp))
 
-
+columnsMatch = {
+    0: 10,
+    1: 11,
+    2: 12,
+    3: 13,
+    4: 14,
+    5: 15,
+    6: 8,
+    7: 9,
+    8: 7,
+}
 @app.route('/api/sendglobaldatachange/', methods=['POST'])
 @cross_origin(supports_credentials=True)
 def sendGlobalDataChange():
+    userData = authorize(request)
     field = request.json['data']['field']
 
     for change in request.json['data']['changes']:
@@ -607,10 +690,11 @@ def sendGlobalDataChange():
             isWriting = False
 
         if (col != 1 or len(value) == 10) and isWriting:
-            cur.execute(f'UPDATE field{field.replace("-", "z")}global set {fieldGlobalColumns[col]} = ? WHERE id = 0', [value if col != 1 else int(strToDate(value).timestamp())])
+            print(f'UPDATE {userData[6]} set {fieldGlobalColumns[columnsMatch[col-1]]} = ? WHERE field_name = {field}', [value if col != 1 else int(strToDate(value).timestamp())])
+            cur.execute(f'UPDATE {userData[6]} set {fieldGlobalColumns[columnsMatch[col-1]]} = ? WHERE field_name = "{field}"', [value if col != 1 else int(strToDate(value).timestamp())])
+            db.commit()
             print('writed!')
         lock.release()
-        db.commit()
     return make_response('')
 
 
@@ -647,12 +731,13 @@ def sendDashboardTableChanges():
 
 
 tableheader = [{'value': '№ п/п'}, {'value': 'Дата'}, {'value': 'день от даты сева'}, {'value': 'температура воздуха t, °С'}, {'value': 'влажность воздуха А, %'}, {'value': 'скорость ветра V2 на высоте 2м, м/с'}, {'value': 'испаряемость Ei, мм/сут'}, {'value': 'средне многолетняя суточная испаряемость Ео, мм/сут'}, {'value': 'Сумма температур воздуха с даты сева ∑t, °С'}, {'value': 'средне многолетний Кбо'}, {'value': 'текущий Кбi'}, {'value': 'Водопотреб ление Ev, мм/сут '}, {'value': 'Расчетный слой почвы h, м'}, {'value': 'Влагоемкость расчетного слоя почвы слоя почвы Wнв, мм'}, {'value': 'Предполивные влагозапасы расчетного слоя слоя почвы Wпр, мм'}, {'value': 'Макс. возможная поливная норма m, мм'}, {'value': 'Весенние влагозапасы на 01.05 Wв=0,9Wнв,мм '}, {'value': 'Приращение Wв'}, {'value': 'Начальные влагозапасы Wн, мм'}, {'value': '(Wнв-Wн)+Ev'}, {'value': 'Атмосферные осадки Р, мм'}, {'value': 'Реализованный полив mф , мм'}, {'value': 'Эффективное поступление влаги Нэф, мм'}, {'value': 'Конечные влагозапасы в расчетном слое почвы Wк,мм '}, {'value': 'Расчетный полив mр, мм'}, {'value': 'Конечные влагозапасы в расчетном слое почвы после полива, мм'}, {'value': 'сколько мм влаги не хватает до верхнего порога (0,95 ППВ)?'}, {'value': 'Диапазон, мм'}, {'value': 'Влагозапасы факт, мм'}]
-@app.route('/api/gettable/')
+@app.route('/api/gettable/', methods=['POST'])
 @cross_origin(supports_credentials=True)
 def getTable():
-    field = request.args['field']
+    userData = authorize(request)
+    field = request.json['data']['field']
 
-    resp = [[{'value': cell if cell else ''} for cell in row] for row in getTableData(db, field)]
+    resp = [[{'value': cell if cell else ''} for cell in row] for row in getTableData(db, field, userData[6])]
     resp.insert(0, tableheader)
     # pprint(resp)
     return make_response(jsonify(resp))
