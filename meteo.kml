@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2" xmlns:gx="http://www.google.com/kml/ext/2.2" xmlns:kml="http://www.opengis.net/kml/2.2" xmlns:atom="http://www.w3.org/2005/Atom">
+<Document>
+	<name>метеостанции.kmz</name>
+	<open>1</open>
+	<Style id="default0">
+		<IconStyle>
+			<color>ff00ff55</color>
+			<Icon>
+				<href>http://maps.google.com/mapfiles/kml/shapes/donut.png</href>
+			</Icon>
+		</IconStyle>
+	</Style>
+	<StyleMap id="default">
+		<Pair>
+			<key>normal</key>
+			<styleUrl>#default0</styleUrl>
+		</Pair>
+		<Pair>
+			<key>highlight</key>
+			<styleUrl>#hl</styleUrl>
+		</Pair>
+	</StyleMap>
+	<StyleMap id="msn_donut">
+		<Pair>
+			<key>normal</key>
+			<styleUrl>#sn_donut0</styleUrl>
+		</Pair>
+		<Pair>
+			<key>highlight</key>
+			<styleUrl>#sh_donut</styleUrl>
+		</Pair>
+	</StyleMap>
+	<StyleMap id="default1">
+		<Pair>
+			<key>normal</key>
+			<styleUrl>#default00</styleUrl>
+		</Pair>
+		<Pair>
+			<key>highlight</key>
+			<styleUrl>#hl0</styleUrl>
+		</Pair>
+	</StyleMap>
+	<Style id="sn_donut0">
+		<IconStyle>
+			<color>ff00ff55</color>
+			<Icon>
+				<href>http://maps.google.com/mapfiles/kml/shapes/donut.png</href>
+			</Icon>
+		</IconStyle>
+	</Style>
+	<Style id="default00">
+		<IconStyle>
+			<color>ff00ff55</color>
+			<Icon>
+				<href>http://maps.google.com/mapfiles/kml/shapes/donut.png</href>
+			</Icon>
+		</IconStyle>
+	</Style>
+	<Style id="hl">
+		<IconStyle>
+			<color>ff00ff55</color>
+			<scale>1.2</scale>
+			<Icon>
+				<href>http://maps.google.com/mapfiles/kml/shapes/donut.png</href>
+			</Icon>
+		</IconStyle>
+	</Style>
+	<Style id="hl0">
+		<IconStyle>
+			<color>ff00ff55</color>
+			<scale>1.2</scale>
+			<Icon>
+				<href>http://maps.google.com/mapfiles/kml/shapes/donut.png</href>
+			</Icon>
+		</IconStyle>
+	</Style>
+	<Style id="sh_donut">
+		<IconStyle>
+			<color>ff00ff55</color>
+			<scale>1.2</scale>
+			<Icon>
+				<href>http://maps.google.com/mapfiles/kml/shapes/donut.png</href>
+			</Icon>
+		</IconStyle>
+	</Style>
+	<Folder>
+		<name>метеостанции</name>
+		<open>1</open>
+		<Placemark>
+			<name>мст 11-3 Бунино</name>
+			<TimeStamp><when>2022-07-09T07:43:03Z</when>
+</TimeStamp>
+			<styleUrl>#default</styleUrl>
+			<ExtendedData>
+				<Data name="comment">
+				</Data>
+				<Data name="visited">
+					<value>1</value>
+				</Data>
+			</ExtendedData>
+			<Point>
+				<coordinates>36.74361244,51.47878654,198.21</coordinates>
+			</Point>
+			<atom:author>
+        <atom:name></atom:name>
+      </atom:author><atom:link href=""></atom:link>
+		</Placemark>
+		<Placemark>
+			<name>мст 29-12 Бунино</name>
+			<open>1</open>
+			<TimeStamp><when>2022-07-09T14:31:24Z</when>
+</TimeStamp>
+			<styleUrl>#msn_donut</styleUrl>
+			<ExtendedData>
+				<Data name="comment">
+				</Data>
+				<Data name="visited">
+					<value>1</value>
+				</Data>
+			</ExtendedData>
+			<Point>
+				<coordinates>36.758728,51.472539,206.41</coordinates>
+			</Point>
+			<atom:author>
+        <atom:name></atom:name>
+      </atom:author><atom:link href=""></atom:link>
+		</Placemark>
+		<Placemark>
+			<name>мст 31-2 Бунино</name>
+			<TimeStamp><when>2022-07-09T09:33:42Z</when>
+</TimeStamp>
+			<styleUrl>#default1</styleUrl>
+			<ExtendedData>
+				<Data name="comment">
+				</Data>
+				<Data name="visited">
+					<value>1</value>
+				</Data>
+			</ExtendedData>
+			<Point>
+				<coordinates>36.77237204,51.4746285,230.97</coordinates>
+			</Point>
+			<atom:author>
+        <atom:name></atom:name>
+      </atom:author><atom:link href=""></atom:link>
+		</Placemark>
+		<Placemark>
+			<name>мст 58-04 Горшечное</name>
+			<open>1</open>
+			<TimeStamp><when>2022-07-09T14:31:24Z</when>
+</TimeStamp>
+			<styleUrl>#msn_donut</styleUrl>
+			<ExtendedData>
+				<Data name="comment">
+				</Data>
+				<Data name="visited">
+					<value>1</value>
+				</Data>
+			</ExtendedData>
+			<Point>
+				<coordinates>37.649226,51.497303,206.41</coordinates>
+			</Point>
+			<atom:author>
+        <atom:name></atom:name>
+      </atom:author><atom:link href=""></atom:link>
+		</Placemark>
+		<Placemark>
+			<name>мст 59-02 Горшечное</name>
+			<TimeStamp><when>2022-07-09T16:44:30Z</when>
+</TimeStamp>
+			<styleUrl>#default1</styleUrl>
+			<ExtendedData>
+				<Data name="comment">
+				</Data>
+				<Data name="visited">
+					<value>1</value>
+				</Data>
+			</ExtendedData>
+			<Point>
+				<coordinates>37.67728096,51.48712711000001,245.36</coordinates>
+			</Point>
+			<atom:author>
+        <atom:name></atom:name>
+      </atom:author><atom:link href=""></atom:link>
+		</Placemark>
+		<Placemark>
+			<name>мст 62-02 Горшечное</name>
+			<open>1</open>
+			<TimeStamp><when>2022-07-09T14:31:24Z</when>
+</TimeStamp>
+			<styleUrl>#default1</styleUrl>
+			<ExtendedData>
+				<Data name="comment">
+				</Data>
+				<Data name="visited">
+					<value>1</value>
+				</Data>
+			</ExtendedData>
+			<Point>
+				<coordinates>37.729603,51.437274,206.41</coordinates>
+			</Point>
+			<atom:author>
+        <atom:name></atom:name>
+      </atom:author><atom:link href=""></atom:link>
+		</Placemark>
+		<Placemark>
+			<name>мст 62-05 Горшечное</name>
+			<TimeStamp><when>2022-07-09T15:15:56Z</when>
+</TimeStamp>
+			<styleUrl>#default</styleUrl>
+			<ExtendedData>
+				<Data name="comment">
+				</Data>
+				<Data name="visited">
+					<value>1</value>
+				</Data>
+			</ExtendedData>
+			<Point>
+				<coordinates>37.71427676,51.45178543,211.69</coordinates>
+			</Point>
+			<atom:author>
+        <atom:name></atom:name>
+      </atom:author><atom:link href=""></atom:link>
+		</Placemark>
+		<Placemark>
+			<name>мст 63-03 Горшечное</name>
+			<TimeStamp><when>2022-07-09T14:31:24Z</when>
+</TimeStamp>
+			<styleUrl>#default</styleUrl>
+			<ExtendedData>
+				<Data name="comment">
+				</Data>
+				<Data name="visited">
+					<value>1</value>
+				</Data>
+			</ExtendedData>
+			<Point>
+				<coordinates>37.67515237,51.45134821,206.41</coordinates>
+			</Point>
+			<atom:author>
+        <atom:name></atom:name>
+      </atom:author><atom:link href=""></atom:link>
+		</Placemark>
+	</Folder>
+</Document>
+</kml>

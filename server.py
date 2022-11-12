@@ -278,20 +278,49 @@ def getDashboardTable(date, request):
     for i in range(len(resp['header'][2])):
         resp['header'][0].append(get_column_letter(i+1))
 
+    
+    fieldsInArea = {}
     lock.acquire(True)
+    # areas = {l[0] for l in cur.execute(f'SELECT area_id from {economy}').fetchall()}
     fields = cur.execute(f'SELECT * from {economy}').fetchall() if (economy != dashboardFields.get('economy')) else dashboardFields['fields']
     lock.release()
+    
     dashboardFields['fields'] = fields
     dashboardFields['economy'] = economy
-    rowTemplate = ['' for _ in range(len(resp['header'][2]))]
+    
     for field in fields:
-        row = int(field[0])
+        if field[fieldGlobalColumnsNames['area_id']] not in fieldsInArea: 
+            fieldsInArea[field[fieldGlobalColumnsNames['area_id']]] = []
+        fieldsInArea[field[fieldGlobalColumnsNames['area_id']]].append(field)
+
+    sortedFields = []
+    for area in sorted(fieldsInArea):
+        sortedFields = [*sortedFields, *sorted(fieldsInArea[area])]
+    # pprint([l[1] for l in sortedFields])
+
+
+    rowTemplate = ['' for _ in range(len(resp['header'][2]))]
+    lastArea = ''
+    rowDelta = 0
+    
+    for _ in range(len(fields) + len(fieldsInArea) - 1):
+        resp['tables'][0].append(rowTemplate[:])
+
+    for i, field in enumerate(sortedFields):
+        row = int(i + rowDelta)
+
+        if lastArea and lastArea != field[fieldGlobalColumnsNames['area_id']]: 
+            print('pass', row)
+            rowDelta += 1
+            lastArea = field[fieldGlobalColumnsNames['area_id']]
+            continue
+        print(row)
+
         lock.acquire(True)
         data = calcAllData(dataFromDBtoTableData(cur.execute(f'SELECT * FROM {field[4]}').fetchall()), field, timestamp=True)
         lock.release()
 
-        resp['tables'][0].append(rowTemplate[:])
-        resp['tables'][0][row][0] = row
+        resp['tables'][0][row][0] = i - rowDelta + 1
         resp['tables'][0][row][1] = field[fieldGlobalColumnsNames['field_name']]
         resp['tables'][0][row][2] = dateToStr(datetime.datetime.fromtimestamp(int(field[fieldGlobalColumnsNames['sowing_date']])))
         resp['tables'][0][row][3] = (date - field[fieldGlobalColumnsNames['sowing_date']]) // 86400
@@ -305,6 +334,7 @@ def getDashboardTable(date, request):
                 resp['tables'][0][row][col+9] = val
             except Exception as e:
                 print(123123, e)
+        lastArea = field[fieldGlobalColumnsNames['area_id']]
     
     [resp['tables'][0].insert(0, row) for row in resp['header'][::-1]]
     resp['tables'] = [[[{'value': val} for val in row] for row in resp['tables'][0]]]
@@ -476,6 +506,8 @@ def dashboardChanges(tableName, request):
     
     changes = request.json['data']['changes']
     for change in changes.values():
+        if not change['field']: 
+            continue
         economy = request.json['userEconomy']
         val, date = (change['value'], change['date'])
         lock.acquire(True)
@@ -554,23 +586,100 @@ def mapicon():
     return send_from_directory(directory='./', path='./mapicon.png')
 
 
+@app.route('/api/getmapdata/', methods=['POST'])
+def getMapData():
+    userData = authorize(request)
+    resp = {
+        'infoPanelData': {
+            'areas': []
+        }
+    }
+    lock.acquire(True)
+    areas = cur.execute(f'SELECT * from {userData[6]}__areas').fetchall()
+    fields = cur.execute(f'SELECT * from {userData[6]}').fetchall()
+    lock.release()
+    totalCultures = {}
+    totalFields = {}
+    totalFC = {}
+    date = int(datetime.datetime.now().timestamp())
+    for field in fields:
+        area_id = field[fieldGlobalColumnsNames['area_id']]
+        area = field[fieldGlobalColumnsNames['area']]
+        culture = field[fieldGlobalColumnsNames['culture']]
+        lock.acquire(True)
+        data = calcAllData(dataFromDBtoTableData(cur.execute(f'SELECT * FROM {field[fieldGlobalColumnsNames["field_id"]]}').fetchall()), field, timestamp=True)
+        lock.release()
+        fc = min([round(d[25] / d[13] * 100) if d[13] != 0 else 0 for d in data][max(min(int(date//86400 - data[0][1]//86400), len(data)-1), 0)], 100)
+        if area_id not in totalFC:
+            totalFC[area_id] = []
+        totalFC[area_id].append(fc)
+        if area_id not in totalFields:
+            totalFields[area_id] = {'count': 0, 'area': 0}
+        totalFields[area_id]['count'] += 1
+        totalFields[area_id]['area'] += area
+
+        if area_id not in totalCultures:
+            totalCultures[area_id] = {}
+        if culture not in totalCultures[area_id]:
+            totalCultures[area_id][culture] = 0
+        totalCultures[area_id][culture] += int(area)
+
+    totalFC = {k: round(sum(totalFC[k]) / len(totalFC[k]), 0) for k in totalFC}
+
+    for area in areas:
+        resp['infoPanelData']['areas'].append({
+            'areaName': area[1],
+            'areaCoordinates': {
+                'zoom': area[5],
+                'center': {
+                    'lat': area[3],
+                    'lng': area[4],
+                }
+            },
+            'totalFC': totalFC[area[2]],
+            'fieldsCount': totalFields[area[2]]['count'],
+            'fieldsArea': totalFields[area[2]]['area'],
+            'cultures': [{'culture': culture, 'area': area} for culture, area in totalCultures[area[2]].items()],
+        })
+    pprint(resp)
+    return make_response(jsonify(resp))
+
+
 @app.route('/api/getmapfields/', methods=['POST'])
 def getMapFields():
     userData = authorize(request)
+    lock.acquire(True)
+    lat, lng = cur.execute(f'SELECT economy_lat, economy_lng from economies WHERE economy_id = ?', [userData[6]]).fetchone()
+    lock.release()
     resp = {
         'settings': {
             'zoom': 10,
             'center': {
-                'lat': 51.46471, 
-                'lng': 37.23724
+                'lat': lat, 
+                'lng': lng
             }
         },
-        'data': []
+        'data': {
+            'meteostations': [],
+            'fields': [],
+        }
     }
+
+    meteostations = getMeteostationsFromDB(db)
+
+    for meteostation in meteostations:
+        resp['data']['meteostations'].append({
+            'center': {'lat': meteostation[3], 'lng': meteostation[4]},
+            'name': meteostation[1],
+        })
+
+    lock.acquire(True)
     fields = cur.execute(f'SELECT * from {userData[6]}').fetchall()
+    lock.release()
     
-    date = 1663693220
+    date = datetime.datetime.now().timestamp()
     i = 0
+    totalFC = 0
     for _, f in enumerate(os.listdir(f'./kml/{userData[6]}/')):
         # field = f"{int(f.split('.')[0].split('-')[-2])}-{f.split('.')[0].split('-')[-1]}"
         field = [l for l in fields if '-'.join([str(int(n)) for n in l[fieldGlobalColumnsNames['field_name']].split('-')]) in '-'.join([str(int(n)) for n in f.split('.')[0].split('-')[-2:]])]
@@ -579,8 +688,14 @@ def getMapFields():
             continue
         field = field[0]
         isAvalible = bool(field)
+        lock.acquire(True)
         data = calcAllData(dataFromDBtoTableData(cur.execute(f'SELECT * FROM {field[4]}').fetchall()), field, timestamp=True) if isAvalible else []
-        resp['data'].append({
+        lock.release()
+        fc = min([round(d[25] / d[13] * 100) if d[13] != 0 else 0 for d in data][max(min(int(date//86400 - data[0][1]//86400), len(data)-1), 0)], 100)
+        watering = round(sum([(d[21] if isinstance(d[21], (int, float)) else 0) for d in data if d[1]//86400 <= date//86400]), 2)
+        mm = [round(d[25]) for d in data][max(min(int(date//86400 - data[0][1]//86400), len(data)-1), 0)]
+        totalFC += fc
+        resp['data']['fields'].append({
             'field': field[fieldGlobalColumnsNames['field_name']],
             'coordinates': [],
             'center': {
@@ -588,7 +703,12 @@ def getMapFields():
                 'lng': 37.23724
             },
             'isAvalible': isAvalible,
-            'color': '#' + redYellowGreenFade[min([round(d[25] / d[13] * 512) if d[13] != 0 else 0 for d in data][max(min(int(date//86400 - data[0][1]//86400), len(data)-1), 0)], 511)] if isAvalible else '#000000'
+            # 'color': '#' + redYellowGreenFade[min([round(d[25] / d[13] * 512) if d[13] != 0 else 0 for d in data][max(min(int(date//86400 - data[0][1]//86400), len(data)-1), 0)], 511)] if isAvalible else '#000000',
+            'fc': fc,
+            'mm': mm,
+            'watering': watering,
+            'culture': field[fieldGlobalColumnsNames['culture']],
+            'color': '#f00' if fc < 60 else '#0f0' if fc > 75 else '#ff0'
         })
 
 
@@ -596,10 +716,12 @@ def getMapFields():
             document = xml.parse(file)
             rawCoords = document.getElementsByTagName('coordinates')[0].childNodes[0].wholeText.strip('\n\t ').split(' ')
             coords = [{'lat': float(l.split(',')[1]), 'lng': float(l.split(',')[0])} for l in rawCoords]
-            resp['data'][i]['coordinates'] = coords[:]
-            resp['data'][i]['center']['lat'] = sum([lat['lat'] for lat in coords]) / len(coords)
-            resp['data'][i]['center']['lng'] = sum([lng['lng'] for lng in coords]) / len(coords)
+            resp['data']['fields'][i]['coordinates'] = coords[:]
+            resp['data']['fields'][i]['center']['lat'] = sum([lat['lat'] for lat in coords]) / len(coords)
+            resp['data']['fields'][i]['center']['lng'] = sum([lng['lng'] for lng in coords]) / len(coords)
         i += 1
+    totalFC /= i
+    resp['totalFC'] = round(totalFC, 0)
     return make_response(jsonify(resp))
 
 
@@ -607,22 +729,33 @@ def getMapFields():
 def getGraphics():
     userData = authorize(request)
     field = request.json['data']['field']
+    date = int(datetime.datetime.now().timestamp())
 
-    resp = []
+    resp = {
+        'fc': 0,
+        'data': []
+    }
 
     fields = cur.execute(f'SELECT * from {userData[6]}').fetchall()
     print(field)
     field = [l for l in fields if field in l[3]][0]
     data = calcAllData(dataFromDBtoTableData(cur.execute(f'SELECT * FROM {field[4]}').fetchall()), field, timestamp=True)
-
+    fc = min([round(d[25] / d[13] * 100) if d[13] != 0 else 0 for d in data][max(min(int(date//86400 - data[0][1]//86400), len(data)-1), 0)], 100)
+    resp['fc'] = fc
+    stressLine = 999999
+    humidityRange = 999999
     for row in data:
-        resp.append({
+        stressLine = min(-row[13]*60/100, stressLine)
+        humidityRange = min(row[27], humidityRange) if isinstance(row[27], (int, float)) else None
+        resp['data'].append({
                     'data': f'{(d := datetime.datetime.fromtimestamp(row[1])).day} {MONTHS[d.month-1]}',
-                    'humidityRange': round(row[27]) if isinstance(row[27], (int, float)) else None,
+                    'humidityRange': round(humidityRange) if isinstance(row[27], (int, float)) else None,
                     'humidity': round(row[28]) if isinstance(row[28], (int, float)) else None,
                     'waterIntake': round(row[11]) if isinstance(row[11], (int, float)) else None,
                     'rain': round(row[20]) if isinstance(row[20], (int, float)) else None,
-                    'watering':  round(row[21]) if isinstance(row[21], (int, float)) else None
+                    'watering':  round(row[21]) if isinstance(row[21], (int, float)) else None,
+                    'stressLine': round(stressLine, 1),
+                    # 'stressLine': -[d[13]*60/100 for d in data][max(min(int(date//86400 - data[0][1]//86400), len(data)-1), 0)],
                 })
     return make_response(jsonify(resp))
 
